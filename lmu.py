@@ -5,13 +5,20 @@ import math
 import numpy as np
 from nengolib.signal import Identity, cont2discrete
 from nengolib.synapses import LegendreDelay
+from functools import partial
+
+
+# from: https://github.com/deepsound-project/samplernn-pytorch/blob/master/nn.py#L46
+def lecun_uniform(tensor):
+    fan_in = nn.init._calculate_correct_fan(tensor, 'fan_in')
+    nn.init.uniform_(tensor, -math.sqrt(3 / fan_in), math.sqrt(3 / fan_in))
 
 
 # based on the tensorflow implementation: 
 # https://github.com/abr/neurips2019/blob/master/lmu/lmu.py
 class LMUCell(nn.Module):
 
-    def __init__(self, input_size, hidden_size, #bias=True,
+    def __init__(self, input_size, hidden_size,
                  order,
                  theta=100,  # relative to dt=1
                  method='zoh',
@@ -23,6 +30,13 @@ class LMUCell(nn.Module):
                  trainable_memory_kernel=True,
                  trainable_A=False,
                  trainable_B=False,
+                 input_encoders_initializer=lecun_uniform,
+                 hidden_encoders_initializer=lecun_uniform,
+                 memory_encoders_initializer=partial(torch.nn.init.constant_, val=0),
+                 input_kernel_initializer=torch.nn.init.xavier_normal_,
+                 hidden_kernel_initializer=torch.nn.init.xavier_normal_,
+                 memory_kernel_initializer=torch.nn.init.xavier_normal_,
+
                  hidden_activation='tanh',
                  ):
         super(LMUCell, self).__init__()
@@ -35,6 +49,8 @@ class LMUCell(nn.Module):
             self.hidden_activation = torch.tanh
         elif hidden_activation == 'relu':
             self.hidden_activation = torch.relu
+        else:
+            raise NotImplementedError("hidden activation '{}' is not implemented".format(hidden_activation))
 
         realizer = Identity()
         self._realizer_result = realizer(
@@ -55,15 +71,13 @@ class LMUCell(nn.Module):
         self.AT = nn.Parameter(torch.Tensor(self._A), requires_grad=trainable_A)
         self.BT = nn.Parameter(torch.Tensor(self._B), requires_grad=trainable_B)
 
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            # only reset the parameters if they are trainable
-            # TODO: allow different initializations to be specified
-            if weight.requires_grad:
-                weight.data.uniform_(-stdv, stdv)
+        # Initialize parameters
+        input_encoders_initializer(self.input_encoders)
+        hidden_encoders_initializer(self.hidden_encoders)
+        memory_encoders_initializer(self.memory_encoders)
+        input_kernel_initializer(self.input_kernel)
+        hidden_kernel_initializer(self.hidden_kernel)
+        memory_kernel_initializer(self.memory_kernel)
 
     def forward(self, input, hx):
 
