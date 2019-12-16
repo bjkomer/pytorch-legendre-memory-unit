@@ -1,3 +1,5 @@
+# based on:
+# https://github.com/abr/neurips2019/blob/master/experiments/psMNIST-standard.ipynb
 import numpy as np
 import os
 import sys
@@ -79,7 +81,7 @@ class LMU(nn.Module):
         return self.softmax(self.dense(h), dim=1)
 
 
-def evalutate(model, dataloader, batch_size=100, writer=None, name='validation'):
+def evalutate(model, dataloader, epoch, batch_size=100, writer=None, name='validation'):
     criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
         avg_loss = 0
@@ -239,10 +241,10 @@ def main(batch_size=100, n_epochs=10, logdir='ps_mnist_lmu'):
         writer.add_scalar('avg_train_loss', avg_loss, epoch + 1)
         writer.add_scalar('avg_train_accuracy', avg_acc, epoch + 1)
 
-        evalutate(model, validloader, batch_size=batch_size, writer=writer, name='validation')
+        evalutate(model, validloader, epoch=epoch+1, batch_size=batch_size, writer=writer, name='validation')
 
     print("Testing")
-    evalutate(model, testloader, batch_size=batch_size, writer=writer, name='test')
+    evalutate(model, testloader, epoch=n_epochs, batch_size=batch_size, writer=writer, name='test')
 
     torch.save(model.state_dict(), os.path.join(save_dir, 'model.pt'))
 
