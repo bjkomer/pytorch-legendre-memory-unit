@@ -67,7 +67,7 @@ class LMU(nn.Module):
             in_features=units,
             out_features=10,
         )
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, inputs):
 
@@ -78,7 +78,7 @@ class LMU(nn.Module):
         for input in inputs:
             h, c = self.lmu_cell(input, (h, c))
 
-        return self.softmax(self.dense(h), dim=1)
+        return self.softmax(self.dense(h))
 
 
 def evalutate(model, dataloader, epoch, batch_size=100, writer=None, name='validation'):
