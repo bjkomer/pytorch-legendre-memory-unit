@@ -7,7 +7,6 @@ Ported from [this](https://github.com/abr/neurips2019) repo and based on [this](
 
 * Example usage
 * Reproduce results from the original paper
-* Allow different initializations to be chosen for each kernel in the `LMUCell`
 * Optimized `LMU` implementation to replace looping of an `LMUCell`
 
 
