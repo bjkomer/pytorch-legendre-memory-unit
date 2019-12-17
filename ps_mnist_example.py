@@ -10,6 +10,7 @@ import torch.optim as optim
 import torch.utils.data as data
 from sklearn.metrics import accuracy_score
 from functools import partial
+import argparse
 
 from tensorboardX import SummaryWriter
 from datetime import datetime
@@ -23,7 +24,7 @@ from train import get_data_iterator
 
 class Dataset(data.Dataset):
 
-    def __init__(self, inputs, outputs, return_list=True):
+    def __init__(self, inputs, outputs, return_list=False):
 
         self.inputs = inputs.astype(np.float32)
         self.outputs = outputs.astype(np.long)
@@ -70,18 +71,20 @@ class LMU(nn.Module):
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, inputs):
+        # inputs is of shape (batch_size, n_steps, 1)
 
-        # TODO: is this the correct hidden state initialization?
         h = torch.zeros(1, self.units)
         c = torch.zeros(1, self.order)
 
-        for input in inputs:
-            h, c = self.lmu_cell(input, (h, c))
+        # feed a batch of pixels into the LMU one at a time
+        for i in range(inputs.shape[1]):
+            h, c = self.lmu_cell(inputs[:, i, :], (h, c))
 
+        # make a prediction based on the final hidden state of the LMU
         return self.softmax(self.dense(h))
 
 
-def evalutate(model, dataloader, epoch, batch_size=100, writer=None, name='validation'):
+def evaluate(model, dataloader, epoch, device, batch_size=100, writer=None, name='validation'):
     criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
         avg_loss = 0
@@ -93,13 +96,13 @@ def evalutate(model, dataloader, epoch, batch_size=100, writer=None, name='valid
             if outputs.size()[0] != batch_size:
                 continue  # Drop data, not enough for a batch
 
-            pred = model(inputs)
+            pred = model(inputs.to(device))
 
-            loss = criterion(pred, outputs)
+            loss = criterion(pred, outputs.to(device))
 
             avg_loss += loss.data.item()
 
-            avg_acc += accuracy_score(outputs.detach().numpy(), np.argmax(pred.detach().numpy(), axis=1))
+            avg_acc += accuracy_score(outputs.detach().cpu().numpy(), np.argmax(pred.detach().cpu().numpy(), axis=1))
 
             n_batches += 1
 
@@ -161,7 +164,19 @@ def get_ps_mnist():
     return X_train, X_valid, X_test, Y_train, Y_valid, Y_test
 
 
-def main(batch_size=100, n_epochs=10, logdir='ps_mnist_lmu'):
+def main(batch_size=100, n_epochs=10, logdir='ps_mnist_lmu', seed=13, gpu=-1):
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    if gpu == -1:
+        device = torch.device('cpu:0')
+        pin_memory = False
+    else:
+        device = torch.device('cuda:{}'.format(int(args.gpu)))
+        torch.cuda.set_device(device)
+        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        pin_memory = True
 
     # Load the dataset
     X_train, X_valid, X_test, Y_train, Y_valid, Y_test = get_ps_mnist()
@@ -201,6 +216,7 @@ def main(batch_size=100, n_epochs=10, logdir='ps_mnist_lmu'):
 
     # Define the LMU model
     model = LMU(units=212, order=256, theta=28**2)
+    model.to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
@@ -219,15 +235,15 @@ def main(batch_size=100, n_epochs=10, logdir='ps_mnist_lmu'):
                 continue  # Drop data, not enough for a batch
             optimizer.zero_grad()
 
-            pred = model(inputs)
+            pred = model(inputs.to(device))
 
-            loss = criterion(pred, outputs)
+            loss = criterion(pred, outputs.to(device))
 
             loss.backward()
 
             avg_loss += loss.data.item()
 
-            avg_acc += accuracy_score(outputs.detach().numpy(), np.argmax(pred.detach().numpy(), axis=1))
+            avg_acc += accuracy_score(outputs.detach().cpu().numpy(), np.argmax(pred.detach().cpu().numpy(), axis=1))
 
             optimizer.step()
 
@@ -241,14 +257,26 @@ def main(batch_size=100, n_epochs=10, logdir='ps_mnist_lmu'):
         writer.add_scalar('avg_train_loss', avg_loss, epoch + 1)
         writer.add_scalar('avg_train_accuracy', avg_acc, epoch + 1)
 
-        evalutate(model, validloader, epoch=epoch+1, batch_size=batch_size, writer=writer, name='validation')
+        evaluate(model, validloader, device=device, epoch=epoch+1, batch_size=batch_size, writer=writer, name='validation')
 
     print("Testing")
-    evalutate(model, testloader, epoch=n_epochs, batch_size=batch_size, writer=writer, name='test')
+    evaluate(model, testloader, device=device, epoch=n_epochs, batch_size=batch_size, writer=writer, name='test')
 
     torch.save(model.state_dict(), os.path.join(save_dir, 'model.pt'))
 
 
 if __name__ == '__main__':
     # Run the Permuted Sequential MNIST Example
-    main()
+    parser = argparse.ArgumentParser(
+        'Train a Legendre Memory Unit model on the Permuted Sequential MNIST task'
+    )
+    parser.add_argument('--batch-size', type=int, default=100)
+    parser.add_argument('--n-epochs', type=int, default=10,
+                        help='Number of training epochs through the dataset')
+    parser.add_argument('--seed', type=int, default=13)
+    parser.add_argument('--logdir', type=str, default='ps_mnist_lmu',
+                        help='Directory for saved model and tensorboard log')
+    parser.add_argument('--gpu', type=int, default=-1,
+                        help="Set to an integer corresponding to the gpu to use. Set to -1 to use the CPU")
+    args = parser.parse_args()
+    main(batch_size=args.batch_size, n_epochs=args.n_epochs, logdir=args.logdir, seed=args.seed, gpu=args.gpu)
